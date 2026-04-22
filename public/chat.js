@@ -13,19 +13,30 @@ function addMessage(text, role) {
     box.scrollTop = box.scrollHeight;
 }
 
-function getAIResponse(userText) {
-    return '(AI 응답 준비 중) "' + userText + '"';
-}
+// function getAIResponse(userText) {
+//     return '(AI 응답 준비 중) "' + userText + '"';
+// }
 
 function sendMessage() {
     const text = $('#chat-input').val().trim();  // .value 대신 .val()
     if (text === '') return;
 
     addMessage(text, 'user');
-    $('#chat-input').val('');                    // 입력창 비우기
+    $('#chat-input').val('');           // 입력창 비우기
 
-    const aiText = getAIResponse(text);
-    addMessage(aiText, 'ai');
+    // $.ajax → fetch() 대신 jQuery가 제공하는 HTTP 요청 함수
+    $.ajax({
+        url: '/api/chat',              // 요청 보낼 주소
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ message: text }),  // 요청 본문 (JSON 문자열로 변환)
+        success: function(data) {      // 응답 성공 시 실행 (fetch의 .then() 대신)
+            addMessage(data.reply, 'ai');
+        },
+        error: function() {            // 요청 실패 시 실행 (fetch의 .catch() 대신)
+            addMessage('오류가 발생했습니다.', 'ai');
+        }
+    });
 }
 
 // .on('이벤트', 함수) → addEventListener 대신

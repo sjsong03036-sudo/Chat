@@ -1,25 +1,29 @@
 import express from 'express';
-import { GoogleGenAI } from '@google/genai';
+import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(express.static('public'));  // public 폴더를 정적 파일로 서빙
+app.use(express.static('public'));
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 브라우저에서 POST /api/chat 으로 요청이 오면 Gemini 호출
 app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: message,
-    });
+    try {
+        const response = await client.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: message }],
+        });
 
-    res.json({ reply: response.text });
+        res.json({ reply: response.choices[0].message.content });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.listen(3000, () => {
