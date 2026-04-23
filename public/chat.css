@@ -25,11 +25,70 @@ body {
 }
 
 #chat-header {
-    padding: 16px 20px;
+    padding: 12px 20px;
     background-color: #4CAF50;
     color: white;
     font-size: 16px;
     font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#mode-toggle {
+    display: flex;
+    gap: 4px;
+}
+
+.mode-btn {
+    padding: 4px 12px;
+    border: 1px solid rgba(255,255,255,0.6);
+    border-radius: 12px;
+    background: transparent;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.mode-btn.active {
+    background: white;
+    color: #4CAF50;
+    font-weight: bold;
+}
+
+#rag-panel {
+    display: none;
+    padding: 10px 16px;
+    background: #f9f9f9;
+    border-bottom: 1px solid #ddd;
+    font-size: 13px;
+    gap: 6px;
+    flex-direction: column;
+}
+
+#rag-panel.visible {
+    display: flex;
+}
+
+#rag-status {
+    color: #666;
+    font-size: 12px;
+}
+
+#upload-label {
+    font-weight: bold;
+    color: #333;
+    cursor: pointer;
+}
+
+#file-input {
+    font-size: 13px;
+}
+
+#upload-msg {
+    font-size: 12px;
+    color: #4CAF50;
+    min-height: 16px;
 }
 
 #chat-box {
@@ -65,6 +124,15 @@ body {
     background-color: #f0f0f0;
     color: #333;
     border-bottom-left-radius: 4px;
+}
+
+/* 출처 표시 */
+.message.source {
+    align-self: flex-start;
+    background: none;
+    color: #999;
+    font-size: 11px;
+    padding: 2px 14px;
 }
 
 #input-area {

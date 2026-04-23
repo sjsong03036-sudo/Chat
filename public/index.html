@@ -10,8 +10,23 @@
 
 <body>
     <div id="chat-container">
-        <div id="chat-header">AI 채팅</div>
+        <div id="chat-header">
+            <span id="header-title">AI 채팅</span>
+            <div id="mode-toggle">
+                <button id="btn-normal" class="mode-btn active">일반</button>
+                <button id="btn-rag" class="mode-btn">RAG</button>
+            </div>
+        </div>
+
+        <div id="rag-panel">
+            <div id="rag-status">문서 0개 청크 로드됨</div>
+            <label id="upload-label" for="file-input">문서 업로드 (TXT / PDF)</label>
+            <input type="file" id="file-input" accept=".txt,.pdf">
+            <div id="upload-msg"></div>
+        </div>
+
         <div id="chat-box"></div>
+
         <div id="input-area">
             <input type="text" id="chat-input" placeholder="메시지를 입력하세요.">
             <button id="send-btn">전송</button>
