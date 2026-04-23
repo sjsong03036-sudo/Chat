@@ -79,6 +79,27 @@ app.get('/api/rag/status', async (_req, res) => {
     }
 });
 
+app.get('/api/rag/documents', async (_req, res) => {
+    try {
+        const { ok, data } = await ragFetch(`${RAG_URL}/rag/documents`);
+        res.status(ok ? 200 : 500).json(data);
+    } catch (err) {
+        res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
+    }
+});
+
+app.delete('/api/rag/documents/:filename', async (req, res) => {
+    try {
+        const { ok, data } = await ragFetch(
+            `${RAG_URL}/rag/documents/${encodeURIComponent(req.params.filename)}`,
+            { method: 'DELETE' }
+        );
+        res.status(ok ? 200 : 500).json(data);
+    } catch (err) {
+        res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
+    }
+});
+
 app.listen(3000, () => {
     console.log('서버 실행 중: http://localhost:3000');
 });

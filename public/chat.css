@@ -64,6 +64,9 @@ body {
     font-size: 13px;
     gap: 6px;
     flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+    max-height: 230px;
 }
 
 #rag-panel.visible {
@@ -76,19 +79,103 @@ body {
 }
 
 #upload-label {
+    display: inline-block;
+    padding: 5px 12px;
+    background: #4CAF50;
+    color: white;
+    border-radius: 8px;
+    font-size: 12px;
     font-weight: bold;
-    color: #333;
     cursor: pointer;
+    text-align: center;
+}
+
+#upload-label.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 #file-input {
-    font-size: 13px;
+    display: none;
 }
 
 #upload-msg {
     font-size: 12px;
     color: #4CAF50;
     min-height: 16px;
+}
+
+#upload-msg.uploading {
+    color: #f59e0b;
+}
+
+#upload-msg.error {
+    color: #ef4444;
+}
+
+#doc-list-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #555;
+    margin-top: 6px;
+}
+
+#doc-list {
+    max-height: 90px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.doc-empty {
+    font-size: 12px;
+    color: #aaa;
+}
+
+.doc-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #efefef;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.doc-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    color: #333;
+}
+
+.doc-delete-btn {
+    background: none;
+    border: none;
+    color: #bbb;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+    line-height: 1;
+    border-radius: 4px;
+}
+
+.doc-delete-btn:hover {
+    color: #ef4444;
+    background: #fde8e8;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+#upload-msg.uploading {
+    animation: blink 1s ease-in-out infinite;
 }
 
 #chat-box {

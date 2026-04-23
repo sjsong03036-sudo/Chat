@@ -20,9 +20,11 @@
 
         <div id="rag-panel">
             <div id="rag-status">문서 0개 청크 로드됨</div>
-            <label id="upload-label" for="file-input">문서 업로드 (TXT / PDF)</label>
-            <input type="file" id="file-input" accept=".txt,.pdf">
+            <label id="upload-label" for="file-input">문서 업로드 (TXT / PDF / JPG / PNG)</label>
+            <input type="file" id="file-input" accept=".txt,.pdf,.jpg,.jpeg,.png,.webp">
             <div id="upload-msg"></div>
+            <div id="doc-list-title">업로드된 문서</div>
+            <div id="doc-list"></div>
         </div>
 
         <div id="chat-box"></div>

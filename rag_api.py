@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
@@ -107,27 +107,73 @@ def extract_image_descriptions(file_path: str) -> list[Document]:
     return image_docs
 
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+SUPPORTED_EXTS = {".pdf", ".txt"} | IMAGE_EXTS
+
+def describe_single_image(file_path: str) -> list[Document]:
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    if ext == "jpg":
+        ext = "jpeg"
+
+    with open(file_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    try:
+        response = llm.invoke([{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/{ext};base64,{b64}"}
+                },
+                {
+                    "type": "text",
+                    "text": "이 이미지를 상세히 설명해라. 표, 차트, 그래프, 수치가 있으면 내용을 최대한 추출해서 설명해라."
+                }
+            ]
+        }])
+        return [Document(
+            page_content=f"[이미지 설명] {response.content}",
+            metadata={"source": file_path, "type": "image"}
+        )]
+    except Exception as e:
+        print(f"이미지 설명 실패: {e}")
+        return []
+
+
 @app.post("/rag/upload")
 async def upload_document(file: UploadFile = File(...)):
-    file_path = os.path.join(DOCS_DIR, file.filename)
+    ext = os.path.splitext(file.filename)[1].lower()
 
+    if ext not in SUPPORTED_EXTS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다: {ext}")
+
+    file_path = os.path.join(DOCS_DIR, file.filename)
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    if file.filename.endswith(".pdf"):
-        loader = PyPDFLoader(file_path)
-    else:
-        loader = TextLoader(file_path, encoding="utf-8")
-
-    documents = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(documents)
-
+    chunks = []
     image_docs = []
-    if file.filename.endswith(".pdf"):
+
+    if ext == ".pdf":
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_documents(documents)
         image_docs = extract_image_descriptions(file_path)
 
-    db.add_documents(chunks + image_docs)
+    elif ext == ".txt":
+        loader = TextLoader(file_path, encoding="utf-8")
+        documents = loader.load()
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_documents(documents)
+
+    elif ext in IMAGE_EXTS:
+        image_docs = describe_single_image(file_path)
+
+    all_docs = chunks + image_docs
+    if all_docs:
+        db.add_documents(all_docs)
 
     return {
         "success": True,
@@ -141,3 +187,22 @@ async def upload_document(file: UploadFile = File(...)):
 async def status():
     count = db._collection.count()
     return {"total_chunks": count}
+
+
+@app.get("/rag/documents")
+async def list_documents():
+    files = sorted(os.listdir(DOCS_DIR))
+    return {"documents": files}
+
+
+@app.delete("/rag/documents/{filename}")
+async def delete_document(filename: str):
+    file_path = os.path.join(DOCS_DIR, filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+    db._collection.delete(where={"source": file_path})
+    os.remove(file_path)
+
+    return {"success": True, "filename": filename}
