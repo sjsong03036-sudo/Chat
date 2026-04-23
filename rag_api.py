@@ -3,11 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import shutil
+import base64
+import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 load_dotenv()
 
@@ -62,6 +65,48 @@ async def rag_chat(req: ChatRequest):
     return {"reply": response.content, "sources": sources}
 
 
+def extract_image_descriptions(file_path: str) -> list[Document]:
+    pdf = fitz.open(file_path)
+    image_docs = []
+
+    for page_num in range(len(pdf)):
+        page = pdf[page_num]
+        for img in page.get_images(full=True):
+            xref = img[0]
+            base_image = pdf.extract_image(xref)
+            image_bytes = base_image["image"]
+
+            # 5KB 미만 이미지는 아이콘/장식으로 간주하고 스킵
+            if len(image_bytes) < 5000:
+                continue
+
+            ext = base_image["ext"]
+            b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            try:
+                response = llm.invoke([{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/{ext};base64,{b64}"}
+                        },
+                        {
+                            "type": "text",
+                            "text": "이 이미지를 상세히 설명해라. 표, 차트, 그래프, 수치가 있으면 내용을 최대한 추출해서 설명해라."
+                        }
+                    ]
+                }])
+                image_docs.append(Document(
+                    page_content=f"[이미지 설명 - {page_num + 1}페이지] {response.content}",
+                    metadata={"source": file_path, "page": page_num + 1, "type": "image"}
+                ))
+            except Exception as e:
+                print(f"이미지 설명 실패 (page {page_num + 1}): {e}")
+
+    return image_docs
+
+
 @app.post("/rag/upload")
 async def upload_document(file: UploadFile = File(...)):
     file_path = os.path.join(DOCS_DIR, file.filename)
@@ -78,9 +123,18 @@ async def upload_document(file: UploadFile = File(...)):
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_documents(documents)
 
-    db.add_documents(chunks)
+    image_docs = []
+    if file.filename.endswith(".pdf"):
+        image_docs = extract_image_descriptions(file_path)
 
-    return {"success": True, "chunks": len(chunks), "filename": file.filename}
+    db.add_documents(chunks + image_docs)
+
+    return {
+        "success": True,
+        "chunks": len(chunks),
+        "image_descriptions": len(image_docs),
+        "filename": file.filename
+    }
 
 
 @app.get("/rag/status")

@@ -29,15 +29,24 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
+async function ragFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    try {
+        return { ok: response.ok, data: JSON.parse(text) };
+    } catch {
+        return { ok: false, data: { error: text || 'RAG 서버 오류' } };
+    }
+}
+
 app.post('/api/rag/chat', async (req, res) => {
     try {
-        const response = await fetch(`${RAG_URL}/rag/chat`, {
+        const { ok, data } = await ragFetch(`${RAG_URL}/rag/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(req.body),
         });
-        const data = await response.json();
-        res.json(data);
+        res.status(ok ? 200 : 500).json(data);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
@@ -50,12 +59,11 @@ app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
         const formData = new FormData();
         formData.append('file', blob, req.file.originalname);
 
-        const response = await fetch(`${RAG_URL}/rag/upload`, {
+        const { ok, data } = await ragFetch(`${RAG_URL}/rag/upload`, {
             method: 'POST',
             body: formData,
         });
-        const data = await response.json();
-        res.json(data);
+        res.status(ok ? 200 : 500).json(data);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
@@ -64,9 +72,8 @@ app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
 
 app.get('/api/rag/status', async (_req, res) => {
     try {
-        const response = await fetch(`${RAG_URL}/rag/status`);
-        const data = await response.json();
-        res.json(data);
+        const { ok, data } = await ragFetch(`${RAG_URL}/rag/status`);
+        res.status(ok ? 200 : 500).json(data);
     } catch (err) {
         res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
     }

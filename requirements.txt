@@ -1,9 +1,12 @@
 fastapi
 uvicorn
+python-multipart
 langchain
 langchain-community
+langchain-chroma
 langchain-openai
 langchain-text-splitters
 chromadb
 python-dotenv
 pypdf
+PyMuPDF

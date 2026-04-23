@@ -85,7 +85,12 @@ $('#file-input').on('change', function() {
         processData: false,
         contentType: false,
         success: function(data) {
-            $('#upload-msg').text(data.filename + ' 업로드 완료 (' + data.chunks + '개 청크)');
+            let msg = data.filename + ' 업로드 완료 (텍스트 ' + data.chunks + '개 청크';
+            if (data.image_descriptions > 0) {
+                msg += ', 이미지 ' + data.image_descriptions + '개 설명';
+            }
+            msg += ')';
+            $('#upload-msg').text(msg);
             loadRagStatus();
         },
         error: function() {
