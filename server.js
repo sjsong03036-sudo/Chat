@@ -15,13 +15,11 @@ const RAG_URL = 'http://localhost:8000';
 
 app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
-
     try {
         const response = await client.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [{ role: 'user', content: message }],
         });
-
         res.json({ reply: response.choices[0].message.content });
     } catch (err) {
         console.error(err);

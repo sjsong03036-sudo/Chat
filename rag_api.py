@@ -1,9 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import os
 import shutil
 import base64
+import json
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
@@ -45,11 +47,11 @@ async def rag_chat(req: ChatRequest):
         return {"reply": "관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.", "sources": []}
 
     context = "\n\n".join([d.page_content for d in docs])
+    sources = list(set([d.metadata.get("source", "알 수 없음") for d in docs]))
 
     prompt = f"""너는 내부 문서를 기반으로 답변하는 도우미다.
 반드시 아래 [문맥]에 있는 내용만 근거로 답변해라.
 문맥에 없는 내용은 "해당 정보를 찾을 수 없습니다"라고 답해라.
-답변 마지막에 참고한 문서 출처를 간략히 언급해라.
 
 [문맥]
 {context}
@@ -59,9 +61,7 @@ async def rag_chat(req: ChatRequest):
 
 [답변]"""
 
-    response = llm.invoke(prompt)
-    sources = list(set([d.metadata.get("source", "알 수 없음") for d in docs]))
-
+    response = await llm.ainvoke(prompt)
     return {"reply": response.content, "sources": sources}
 
 
@@ -185,8 +185,9 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.get("/rag/status")
 async def status():
-    count = db._collection.count()
-    return {"total_chunks": count}
+    total_chunks = db._collection.count()
+    total_documents = len(os.listdir(DOCS_DIR))
+    return {"total_chunks": total_chunks, "total_documents": total_documents}
 
 
 @app.get("/rag/documents")
