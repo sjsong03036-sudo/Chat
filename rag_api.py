@@ -1,11 +1,13 @@
 # ─── 외부 라이브러리 임포트 ──────────────────────────────────────────────────
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # 브라우저의 CORS 요청 허용
+from fastapi.responses import StreamingResponse     # SSE 스트리밍 응답
 from pydantic import BaseModel                      # 요청 바디 스키마 정의
 import os
 import shutil      # 파일 복사 (업로드 저장)
 import base64      # 이미지를 base64로 인코딩해 LLM에 전달
 import json
+import asyncio     # 동기 블로킹 함수를 스레드풀에서 실행해 이벤트 루프 차단 방지
 import fitz        # PyMuPDF: PDF에서 이미지 추출
 from dotenv import load_dotenv
 
@@ -160,54 +162,75 @@ def describe_single_image(file_path: str) -> list[Document]:
         return []
 
 
-# ─── 문서 업로드 엔드포인트 ──────────────────────────────────────────────────
-# 파일 형식에 따라 다른 처리 방식 적용:
-#   PDF  → 텍스트 청크 + 이미지 설명 Document 생성
-#   TXT  → 텍스트 청크만 생성
-#   이미지 → GPT Vision으로 설명 Document 생성
-# 생성된 Document를 ChromaDB에 임베딩하여 저장
+# ─── 문서 업로드 엔드포인트 (SSE 스트리밍) ───────────────────────────────────
+# 처리 단계마다 진행 이벤트를 SSE로 전송:
+#   saved    → 파일 저장 완료
+#   chunking → 텍스트 분할 시작
+#   chunked  → 분할 완료 (청크 수 포함)
+#   imaging  → 이미지 분석 시작
+#   imaged   → 이미지 분석 완료 (이미지 수 포함)
+#   embedding→ 임베딩 배치 진행 (done/total 포함)
+#   done     → 모든 처리 완료 (최종 통계)
+#   error    → 오류 발생 (메시지 포함)
 @app.post("/rag/upload")
 async def upload_document(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1].lower()
+    async def generate():
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in SUPPORTED_EXTS:
+            yield f"data: {json.dumps({'error': f'지원하지 않는 파일 형식입니다: {ext}'})}\n\n"
+            return
 
-    if ext not in SUPPORTED_EXTS:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다: {ext}")
+        # 파일을 docs 폴더에 저장
+        file_path = os.path.join(DOCS_DIR, file.filename)
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+        yield f"data: {json.dumps({'stage': 'saved'})}\n\n"
 
-    # 업로드된 파일을 docs 폴더에 저장
-    file_path = os.path.join(DOCS_DIR, file.filename)
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        chunks = []
+        image_docs = []
 
-    chunks = []
-    image_docs = []
+        if ext == ".pdf":
+            yield f"data: {json.dumps({'stage': 'chunking'})}\n\n"
+            loader = PyPDFLoader(file_path)
+            documents = loader.load()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            chunks = splitter.split_documents(documents)
+            yield f"data: {json.dumps({'stage': 'chunked', 'count': len(chunks)})}\n\n"
 
-    if ext == ".pdf":
-        loader = PyPDFLoader(file_path)
-        documents = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        chunks = splitter.split_documents(documents) # 500자 단위로 분할, 50자 겹침
-        image_docs = extract_image_descriptions(file_path)
+            yield f"data: {json.dumps({'stage': 'imaging'})}\n\n"
+            # 동기 블로킹 함수를 스레드풀에서 실행해 SSE 전송이 끊기지 않도록 처리
+            image_docs = await asyncio.to_thread(extract_image_descriptions, file_path)
+            yield f"data: {json.dumps({'stage': 'imaged', 'count': len(image_docs)})}\n\n"
 
-    elif ext == ".txt":
-        loader = TextLoader(file_path, encoding="utf-8")
-        documents = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        chunks = splitter.split_documents(documents)
+        elif ext == ".txt":
+            yield f"data: {json.dumps({'stage': 'chunking'})}\n\n"
+            loader = TextLoader(file_path, encoding="utf-8")
+            documents = loader.load()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            chunks = splitter.split_documents(documents)
+            yield f"data: {json.dumps({'stage': 'chunked', 'count': len(chunks)})}\n\n"
 
-    elif ext in IMAGE_EXTS:
-        image_docs = describe_single_image(file_path)
+        elif ext in IMAGE_EXTS:
+            yield f"data: {json.dumps({'stage': 'imaging'})}\n\n"
+            image_docs = await asyncio.to_thread(describe_single_image, file_path)
+            yield f"data: {json.dumps({'stage': 'imaged', 'count': len(image_docs)})}\n\n"
 
-    # 텍스트 청크 + 이미지 설명을 합쳐 ChromaDB에 임베딩 저장
-    all_docs = chunks + image_docs
-    if all_docs:
-        db.add_documents(all_docs)
+        all_docs = chunks + image_docs
+        total_docs = len(all_docs)
 
-    return {
-        "success": True,
-        "chunks": len(chunks),
-        "image_descriptions": len(image_docs),
-        "filename": file.filename
-    }
+        if all_docs:
+            # 5개씩 배치로 임베딩해 진행률을 실시간으로 전송
+            BATCH = 5
+            for i in range(0, total_docs, BATCH):
+                batch = all_docs[i:i + BATCH]
+                await asyncio.to_thread(db.add_documents, batch)
+                done = min(i + BATCH, total_docs)
+                yield f"data: {json.dumps({'stage': 'embedding', 'done': done, 'total': total_docs})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'done', 'chunks': len(chunks), 'images': len(image_docs), 'filename': file.filename})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ─── RAG 상태 조회 엔드포인트 ────────────────────────────────────────────────

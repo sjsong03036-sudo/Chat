@@ -224,53 +224,159 @@ $('#btn-rag').on('click', function() {
 });
 
 // ─── 파일 업로드 ──────────────────────────────────────────────────────────────
-// 선택한 파일 여러 개를 순차적으로 서버에 업로드하고 진행 상황을 실시간 표시
+let uploadCancelled = false;
+let currentXhr = null;
+
+// XHR로 파일 1개를 업로드하면서 두 가지 진행 정보를 콜백으로 전달:
+//   { type: 'upload', pct }  → 파일 전송 % (브라우저 → Node.js)
+//   { type: 'stage', data }  → FastAPI SSE 진행 이벤트 (chunking/embedding 등)
+function uploadFile(file, onUpdate) {
+    return new Promise((resolve) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+        currentXhr = xhr;
+
+        let lastLen = 0;
+        let buf = '';
+        let lastResult = null;
+
+        // 파일 전송 진행률 (브라우저 → Node.js 서버)
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                onUpdate({ type: 'upload', pct: Math.round(e.loaded / e.total * 100) });
+            }
+        };
+
+        // 응답 본문에서 SSE 이벤트를 점진적으로 읽어 onUpdate 콜백으로 전달
+        xhr.onreadystatechange = () => {
+            if (xhr.readyState >= 3 && xhr.responseText.length > lastLen) {
+                buf += xhr.responseText.slice(lastLen);
+                lastLen = xhr.responseText.length;
+
+                const lines = buf.split('\n');
+                buf = lines.pop(); // 아직 완성되지 않은 마지막 줄은 버퍼에 보관
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.error) lastResult = { ok: false, error: data.error };
+                        else if (data.stage === 'done') lastResult = { ok: true, ...data };
+                        onUpdate({ type: 'stage', data });
+                    } catch (_) {}
+                }
+            }
+            if (xhr.readyState === 4) {
+                // 버퍼에 남아있는 미처리 줄이 있으면 마지막으로 처리
+                if (buf.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(buf.slice(6).trim());
+                        if (data.error) lastResult = { ok: false, error: data.error };
+                        else if (data.stage === 'done') lastResult = { ok: true, ...data };
+                    } catch (_) {}
+                }
+                currentXhr = null;
+                resolve(lastResult || { ok: false, error: '서버 응답 없음' });
+            }
+        };
+
+        xhr.onerror = () => { currentXhr = null; resolve({ ok: false, error: '네트워크 오류' }); };
+        xhr.onabort = () => { currentXhr = null; resolve({ ok: false, aborted: true }); };
+
+        xhr.open('POST', '/api/rag/upload');
+        xhr.send(formData);
+    });
+}
+
+// 중단 버튼 클릭 시 현재 XHR을 즉시 중단하고 루프 탈출 유도
+$('#upload-cancel-btn').on('click', function() {
+    uploadCancelled = true;
+    if (currentXhr) currentXhr.abort();
+});
+
+// 선택한 파일 여러 개를 순차 업로드하고 단계별 진행 상황을 실시간 표시
 $('#file-input').on('change', async function() {
     const files = Array.from(this.files);
     if (files.length === 0) return;
 
-    // 업로드 중 중복 선택 방지
+    uploadCancelled = false;
+
     $('#file-input').prop('disabled', true);
     $('#upload-label').addClass('disabled');
-    $(this).val(''); // 같은 파일을 다시 선택할 수 있도록 input 초기화
+    $('#upload-cancel-btn').show();
+    $(this).val('');
 
     const total = files.length;
     let succeeded = 0;
-    let failed = 0;
+    let stopReason = null;
+    let failedIndex = -1;
 
-    for (const file of files) {
-        // 현재 업로드 중인 파일명과 진행 순서 표시
-        $('#upload-msg').text(`업로드 중... ${file.name} (${succeeded + failed + 1}/${total})`).removeClass('error').addClass('uploading');
+    for (let i = 0; i < files.length; i++) {
+        if (uploadCancelled) { stopReason = 'cancel'; break; }
 
-        const formData = new FormData();
-        formData.append('file', file);
+        const file = files[i];
+        const seq = total > 1 ? ` (${i + 1}/${total})` : '';
 
-        // Promise로 감싸 $.ajax의 비동기를 await로 기다림 (순차 업로드 보장)
-        await new Promise(function(resolve) {
-            $.ajax({
-                url: '/api/rag/upload',
-                method: 'POST',
-                data: formData,
-                processData: false, // FormData를 문자열로 변환하지 않음
-                contentType: false, // jQuery가 Content-Type을 덮어쓰지 않도록
-                success: function() { succeeded++; },
-                error: function() { failed++; },
-                complete: resolve, // 성공/실패 무관하게 다음 파일로 진행
-            });
+        const result = await uploadFile(file, ({ type, pct, data }) => {
+            if (type === 'upload') {
+                $('#upload-msg')
+                    .text(`파일 전송 중... ${file.name}${seq} ${pct}%`)
+                    .removeClass('error').addClass('uploading');
+            } else if (type === 'stage') {
+                const s = data?.stage;
+                if (s === 'chunking') {
+                    $('#upload-msg').text(`청크 분할 중... ${file.name}${seq}`);
+                } else if (s === 'chunked') {
+                    $('#upload-msg').text(`청크 분할 완료 — ${data.count}개${seq}`);
+                } else if (s === 'imaging') {
+                    $('#upload-msg').text(`이미지 분석 중... ${file.name}${seq}`);
+                } else if (s === 'imaged') {
+                    $('#upload-msg').text(`이미지 분석 완료 — ${data.count}개${seq}`);
+                } else if (s === 'embedding') {
+                    // 임베딩 배치 진행률
+                    const pct = Math.round(data.done / data.total * 100);
+                    $('#upload-msg').text(`임베딩 중... ${data.done}/${data.total}개 (${pct}%)${seq}`);
+                } else if (data?.error) {
+                    $('#upload-msg').text(`✗ ${data.error}`).addClass('error').removeClass('uploading');
+                }
+            }
         });
+
+        if (result.aborted) { stopReason = 'cancel'; break; }
+        if (!result.ok) { stopReason = 'error:' + (result.error || '알 수 없는 오류'); failedIndex = i; break; }
+
+        succeeded++;
+
+        // 파일 1개 완료 — 청크 수와 이미지 수 표시
+        const parts = [];
+        if (result.chunks > 0) parts.push(`텍스트 ${result.chunks}개 청크`);
+        if (result.images > 0) parts.push(`이미지 ${result.images}개`);
+        const info = parts.join(', ') || '처리 완료';
+        $('#upload-msg')
+            .text(`✓ ${file.name} — ${info}${seq}`)
+            .removeClass('uploading error');
     }
 
-    loadRagStatus(); // 전체 업로드 완료 후 문서 수 / 청크 수 갱신
+    loadRagStatus();
 
-    // 결과 메시지 표시
-    if (failed === 0) {
-        $('#upload-msg').text(`✓ ${total}개 파일 업로드 완료`).removeClass('uploading error');
-    } else {
-        $('#upload-msg').text(`✓ ${succeeded}개 완료 / ✗ ${failed}개 실패`).removeClass('uploading').addClass('error');
+    if (stopReason === 'cancel') {
+        $('#upload-msg')
+            .text(`⊘ 업로드 중단됨 (${succeeded}/${total}개 완료)`)
+            .removeClass('uploading').addClass('error');
+    } else if (stopReason?.startsWith('error:')) {
+        $('#upload-msg')
+            .text(`✗ ${files[failedIndex].name} 실패: ${stopReason.slice(6)}`)
+            .removeClass('uploading').addClass('error');
+    } else if (total > 1) {
+        // 여러 파일이면 최종 요약 (단일 파일은 개별 완료 메시지 유지)
+        $('#upload-msg').text(`✓ ${total}개 파일 모두 완료`).removeClass('uploading error');
     }
 
     $('#file-input').prop('disabled', false);
     $('#upload-label').removeClass('disabled');
+    $('#upload-cancel-btn').hide();
 });
 
 // ─── 이벤트 바인딩 ────────────────────────────────────────────────────────────

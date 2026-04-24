@@ -61,23 +61,35 @@ app.post('/api/rag/chat', async (req, res) => {
     }
 });
 
-// ─── 문서 업로드 API ──────────────────────────────────────────────────────────
-// multer로 파일을 메모리에 받은 뒤 Blob으로 변환해 FastAPI에 multipart로 전달
+// ─── 문서 업로드 API (SSE 프록시) ────────────────────────────────────────────
+// multer로 파일을 메모리에 받은 뒤 FastAPI로 전달하고,
+// FastAPI가 보내는 SSE 진행 이벤트를 그대로 브라우저로 스트리밍
 app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     try {
         const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
         const formData = new FormData();
         formData.append('file', blob, req.file.originalname);
 
-        const { ok, data } = await ragFetch(`${RAG_URL}/rag/upload`, {
+        const upstream = await fetch(`${RAG_URL}/rag/upload`, {
             method: 'POST',
             body: formData,
         });
-        res.status(ok ? 200 : 500).json(data);
+
+        const reader = upstream.body.getReader();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+        }
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'RAG 서버에 연결할 수 없습니다.' });
+        res.write(`data: ${JSON.stringify({ error: 'RAG 서버에 연결할 수 없습니다.' })}\n\n`);
     }
+    res.end();
 });
 
 // ─── RAG 상태 조회 API ────────────────────────────────────────────────────────
