@@ -9,16 +9,23 @@
 </head>
 
 <body>
+    <!-- 전체 채팅 컨테이너 -->
     <div id="chat-container">
+
+        <!-- 헤더: 타이틀 + 모드 전환 버튼 -->
         <div id="chat-header">
             <span id="header-title">AI 채팅</span>
+            <!-- 일반 / RAG 모드 전환 토글 버튼 -->
             <div id="mode-toggle">
                 <button id="btn-normal" class="mode-btn active">일반</button>
                 <button id="btn-rag" class="mode-btn">RAG</button>
             </div>
         </div>
 
+        <!-- RAG 패널: RAG 모드일 때만 표시 (chat.js에서 .visible 클래스로 제어) -->
         <div id="rag-panel">
+
+            <!-- 문서 통계: 업로드된 문서 수 / 총 청크 수 -->
             <div id="rag-stats">
                 <div class="stat-item">
                     <span class="stat-label">업로드된 문서</span>
@@ -30,35 +37,47 @@
                     <span class="stat-value" id="stat-chunks">0개</span>
                 </div>
             </div>
+
+            <!-- 액션 버튼: 문서 업로드 / 문서 목록 보기 -->
             <div id="rag-panel-actions">
+                <!-- label이 실제 버튼 역할, input은 숨겨져 있음 (파일 선택 창 트리거) -->
                 <label id="upload-label" for="file-input">+ 문서 업로드</label>
-                <input type="file" id="file-input" accept=".txt,.pdf,.jpg,.jpeg,.png,.webp">
+                <!-- multiple: 여러 파일 동시 선택 가능 -->
+                <input type="file" id="file-input" accept=".txt,.pdf,.jpg,.jpeg,.png,.webp" multiple>
                 <button id="doc-list-btn">문서 목록 보기</button>
             </div>
+
+            <!-- 업로드 진행 상태 메시지 (업로드 중 / 완료 / 실패) -->
             <div id="upload-msg"></div>
         </div>
 
+        <!-- 채팅 메시지 영역: 말풍선들이 쌓이는 스크롤 가능한 공간 -->
         <div id="chat-box"></div>
 
+        <!-- 입력 영역: 텍스트 입력창 + 전송 버튼 -->
         <div id="input-area">
             <input type="text" id="chat-input" placeholder="메시지를 입력하세요.">
             <button id="send-btn">전송</button>
         </div>
     </div>
 
-    <!-- 문서 목록 모달 -->
+    <!-- 문서 목록 모달: 오버레이 클릭 또는 ✕ 버튼으로 닫힘 -->
     <div id="doc-modal-overlay">
         <div id="doc-modal">
             <div id="doc-modal-header">
                 <span>업로드된 문서</span>
                 <button id="doc-modal-close">✕</button>
             </div>
+            <!-- 문서 목록이 동적으로 삽입되는 영역 (chat.js의 renderDocuments 함수) -->
             <div id="doc-modal-list"></div>
         </div>
     </div>
 
+    <!-- 외부 라이브러리 -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- marked@4.3.0: 마크다운을 HTML로 변환 (v4 고정: 동기 API 사용) -->
     <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+    <!-- DOMPurify: XSS 공격 방지용 HTML 정제 -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <script src="chat.js"></script>
 </body>
