@@ -72,7 +72,9 @@ app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
     try {
         const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
         const formData = new FormData();
-        formData.append('file', blob, req.file.originalname);
+        // multer가 Latin-1로 읽은 파일명을 UTF-8로 재변환
+        const filename = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+        formData.append('file', blob, filename);
 
         const upstream = await fetch(`${RAG_URL}/rag/upload`, {
             method: 'POST',
