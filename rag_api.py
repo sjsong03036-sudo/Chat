@@ -53,7 +53,16 @@ class ChatRequest(BaseModel):
 @app.post("/rag/chat")
 async def rag_chat(req: ChatRequest):
     retriever = db.as_retriever(search_kwargs={"k": 3}) # 유사도 상위 3개 청크 검색
-    docs = retriever.invoke(req.message)
+    # HyDE: 질문으로 가상 답변을 먼저 생성하고, 그 답변으로 검색
+    # 질문(구어체)보다 가상 답변(문서 문체)이 실제 문서와 임베딩 거리가 가까워 검색 품질 향상
+    hyde_prompt = f"""다음 질문에 대해 병원 내부 문서에 있을 법한 내용으로 짧게 답변해라.
+정확하지 않아도 되며, 문서에서 나올 법한 문체와 용어로만 작성하면 된다.
+
+질문: {req.message}
+
+답변:"""
+    hyde_doc = await llm.ainvoke(hyde_prompt)
+    docs = retriever.invoke(hyde_doc.content)
 
     if not docs:
         return {"reply": "관련 문서를 찾을 수 없습니다. 먼저 문서를 업로드해주세요.", "sources": []}
